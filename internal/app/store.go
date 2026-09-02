@@ -31,12 +31,17 @@ type dialog struct {
 	PeerKey    string `json:"peerKey"`
 	Kind       string `json:"kind"`
 	Title      string `json:"title"`
-	Subtitle   string `json:"subtitle,omitempty"`
+	Subtitle   string `json:"subtitle,omitempty"`   // 会话类型：超级群组、频道、论坛…
+	Username   string `json:"username,omitempty"`   // 仅用于前端搜索
+	LastSender string `json:"lastSender,omitempty"` // 最后一条消息的发送者
+	LastText   string `json:"lastText,omitempty"`   // 最后一条消息的摘要
 	Selectable bool   `json:"selectable"`
 	Selected   bool   `json:"selected"`
 	AdFilter   bool   `json:"adFilter"`
 	Archived   bool   `json:"archived"`
+	Pinned     bool   `json:"pinned"`
 	SelectedAt int64  `json:"-"`
+	LastAt     int64  `json:"-"`
 }
 
 type queuedMessage struct {
@@ -95,7 +100,12 @@ CREATE TABLE IF NOT EXISTS dialogs (
   selected INTEGER NOT NULL DEFAULT 0,
   ad_filter INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  username TEXT NOT NULL DEFAULT '',
   selected_at INTEGER NOT NULL DEFAULT 0,
+  last_at INTEGER NOT NULL DEFAULT 0,
+  last_sender BLOB,
+  last_text BLOB,
   updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS queue (
@@ -112,6 +122,18 @@ CREATE INDEX IF NOT EXISTS queue_due ON queue(next_attempt, id);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	// Columns added after the first release; existing databases keep their user state.
+	for _, statement := range []string{
+		`ALTER TABLE dialogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE dialogs ADD COLUMN last_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE dialogs ADD COLUMN username TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE dialogs ADD COLUMN last_sender BLOB`,
+		`ALTER TABLE dialogs ADD COLUMN last_text BLOB`,
+	} {
+		if _, err := s.db.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
 	}
 	return nil
 }
@@ -132,6 +154,26 @@ func (s *store) open(ciphertext []byte) ([]byte, error) {
 	}
 	nonce := ciphertext[:s.aead.NonceSize()]
 	return s.aead.Open(nil, nonce, ciphertext[s.aead.NonceSize():], nil)
+}
+
+// Message previews are chat content, so they follow the same rule as the send
+// queue: encrypted at rest, and unreadable rather than fatal after a key change.
+func (s *store) sealText(value string) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	return s.seal([]byte(value))
+}
+
+func (s *store) openText(ciphertext []byte) string {
+	if len(ciphertext) == 0 {
+		return ""
+	}
+	plain, err := s.open(ciphertext)
+	if err != nil {
+		return ""
+	}
+	return string(plain)
 }
 
 func (s *store) set(ctx context.Context, key, value string, secret bool) error {
@@ -197,18 +239,32 @@ func (s *store) replaceDialogs(ctx context.Context, dialogs []dialog) error {
 	defer tx.Rollback()
 	now := time.Now().UnixNano()
 	for _, d := range dialogs {
+		sender, err := s.sealText(d.LastSender)
+		if err != nil {
+			return err
+		}
+		text, err := s.sealText(d.LastText)
+		if err != nil {
+			return err
+		}
+		// A live update may already hold a newer preview than this refresh.
 		_, err = tx.ExecContext(ctx, `
-INSERT INTO dialogs(peer_key,kind,title,subtitle,selectable,archived,updated_at)
-VALUES(?,?,?,?,?,?,?)
+INSERT INTO dialogs(peer_key,kind,title,subtitle,username,selectable,archived,pinned,last_at,last_sender,last_text,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(peer_key) DO UPDATE SET
   kind=excluded.kind,
   title=excluded.title,
   subtitle=excluded.subtitle,
+  username=excluded.username,
   selectable=excluded.selectable,
   selected=CASE WHEN excluded.selectable=1 THEN dialogs.selected ELSE 0 END,
   archived=excluded.archived,
+  pinned=excluded.pinned,
+  last_sender=CASE WHEN excluded.last_at>=dialogs.last_at THEN excluded.last_sender ELSE dialogs.last_sender END,
+  last_text=CASE WHEN excluded.last_at>=dialogs.last_at THEN excluded.last_text ELSE dialogs.last_text END,
+  last_at=MAX(excluded.last_at,dialogs.last_at),
   updated_at=excluded.updated_at`,
-			d.PeerKey, d.Kind, d.Title, d.Subtitle, d.Selectable, d.Archived, now)
+			d.PeerKey, d.Kind, d.Title, d.Subtitle, d.Username, d.Selectable, d.Archived, d.Pinned, d.LastAt, sender, text, now)
 		if err != nil {
 			return err
 		}
@@ -220,7 +276,7 @@ ON CONFLICT(peer_key) DO UPDATE SET
 }
 
 func (s *store) dialogs(ctx context.Context) ([]dialog, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT peer_key,kind,title,subtitle,selectable,selected,ad_filter,archived,selected_at FROM dialogs ORDER BY archived,title COLLATE NOCASE`)
+	rows, err := s.db.QueryContext(ctx, `SELECT peer_key,kind,title,subtitle,username,selectable,selected,ad_filter,archived,pinned,selected_at,last_at,last_sender,last_text FROM dialogs ORDER BY archived,pinned DESC,last_at DESC,title COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -228,9 +284,11 @@ func (s *store) dialogs(ctx context.Context) ([]dialog, error) {
 	var result []dialog
 	for rows.Next() {
 		var d dialog
-		if err := rows.Scan(&d.PeerKey, &d.Kind, &d.Title, &d.Subtitle, &d.Selectable, &d.Selected, &d.AdFilter, &d.Archived, &d.SelectedAt); err != nil {
+		var sender, text []byte
+		if err := rows.Scan(&d.PeerKey, &d.Kind, &d.Title, &d.Subtitle, &d.Username, &d.Selectable, &d.Selected, &d.AdFilter, &d.Archived, &d.Pinned, &d.SelectedAt, &d.LastAt, &sender, &text); err != nil {
 			return nil, err
 		}
+		d.LastSender, d.LastText = s.openText(sender), s.openText(text)
 		result = append(result, d)
 	}
 	return result, rows.Err()
@@ -238,8 +296,8 @@ func (s *store) dialogs(ctx context.Context) ([]dialog, error) {
 
 func (s *store) dialog(ctx context.Context, peerKey string) (dialog, bool, error) {
 	var d dialog
-	err := s.db.QueryRowContext(ctx, `SELECT peer_key,kind,title,subtitle,selectable,selected,ad_filter,archived,selected_at FROM dialogs WHERE peer_key=?`, peerKey).
-		Scan(&d.PeerKey, &d.Kind, &d.Title, &d.Subtitle, &d.Selectable, &d.Selected, &d.AdFilter, &d.Archived, &d.SelectedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT peer_key,kind,title,subtitle,username,selectable,selected,ad_filter,archived,pinned,selected_at,last_at FROM dialogs WHERE peer_key=?`, peerKey).
+		Scan(&d.PeerKey, &d.Kind, &d.Title, &d.Subtitle, &d.Username, &d.Selectable, &d.Selected, &d.AdFilter, &d.Archived, &d.Pinned, &d.SelectedAt, &d.LastAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return dialog{}, false, nil
 	}
@@ -269,6 +327,22 @@ func (s *store) updateDialog(ctx context.Context, peerKey string, selected, adFi
 		d.AdFilter = *adFilter
 	}
 	_, err = s.db.ExecContext(ctx, `UPDATE dialogs SET selected=?,ad_filter=?,selected_at=? WHERE peer_key=?`, d.Selected, d.AdFilter, d.SelectedAt, peerKey)
+	return err
+}
+
+// updateDialogPreview keeps the chat list in sync with live traffic; the guard
+// keeps an out-of-order or replayed update from overwriting a newer preview.
+func (s *store) updateDialogPreview(ctx context.Context, peerKey, sender, text string, at int64) error {
+	sealedSender, err := s.sealText(sender)
+	if err != nil {
+		return err
+	}
+	sealedText, err := s.sealText(text)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE dialogs SET last_sender=?,last_text=?,last_at=? WHERE peer_key=? AND last_at<=?`,
+		sealedSender, sealedText, at, peerKey, at)
 	return err
 }
 

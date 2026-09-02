@@ -232,7 +232,9 @@ func (p *pushService) sendNext(ctx context.Context) {
 	shortCode, sendErr := client.Send(sendCtx, &pushplus.SendRequest{
 		Title: job.Title, Content: job.Content, Topic: topic,
 		Template: pushplus.Template(job.Template), Channel: pushplus.ChannelWechat,
-		Timestamp: job.CreatedAt.Add(10 * time.Minute).UnixMilli(),
+		// Validity of this request, not of the original message: a queue-relative
+		// deadline expires exactly as the message becomes due and is rejected as 999.
+		Timestamp: time.Now().Add(2 * time.Minute).UnixMilli(),
 	})
 	cancel()
 	if sendErr == nil {
@@ -244,19 +246,24 @@ func (p *pushService) sendNext(ctx context.Context) {
 		return
 	}
 
-	retry := false
-	if sdkErr, ok := pushplus.AsError(sendErr); ok {
-		retry = sdkErr.Cause != nil || (sdkErr.Code >= 500 && sdkErr.Code != 600 && sdkErr.Code != 900)
-	} else {
-		retry = true
-	}
-	if retry && job.Attempts < 2 {
+	if retryableSendError(sendErr) && job.Attempts < 2 {
 		delay := time.Duration(1<<job.Attempts) * 30 * time.Second
 		_ = p.store.retryQueued(ctx, job.ID, job.Attempts+1, time.Now().Add(delay))
 		return
 	}
 	_ = p.store.deleteQueued(ctx, job.ID)
 	p.addRecent(delivery{Key: job.DedupeKey, Title: job.Title, Time: time.Now().Format("01-02 15:04"), Status: "failed", Error: sendErr.Error()})
+}
+
+// retryableSendError reports whether a failed send is worth another attempt.
+// Only transport failures and genuine server errors are: every other business
+// code (quota, token, not verified, validation…) is permanent, and retrying one
+// burns a paced send slot that the queued messages behind it are waiting for.
+func retryableSendError(err error) bool {
+	if sdkErr, ok := pushplus.AsError(err); ok {
+		return sdkErr.Cause != nil || sdkErr.Code == int(pushplus.ErrorCodeServerError)
+	}
+	return true
 }
 
 func (p *pushService) track(shortCode, title, key string) {

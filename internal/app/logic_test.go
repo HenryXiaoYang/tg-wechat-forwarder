@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
+
+	pushplus "github.com/pushplus/perk-pushplus-go-sdk"
 )
 
 func TestCoreHelpers(t *testing.T) {
@@ -28,6 +31,23 @@ func TestCoreHelpers(t *testing.T) {
 		items := p.deliveries(context.Background())
 		if len(items) != 1 || items[0].Content != "body" || items[0].Status != "accepted" {
 			t.Fatalf("unexpected deliveries: %#v", items)
+		}
+	})
+
+	t.Run("only transport and server errors are retried", func(t *testing.T) {
+		for _, permanent := range []int{600, 900, 903, 905, 999} {
+			if retryableSendError(&pushplus.Error{Code: permanent, Msg: "permanent"}) {
+				t.Fatalf("code %d was queued for retry", permanent)
+			}
+		}
+		if !retryableSendError(&pushplus.Error{Code: 500, Msg: "server"}) {
+			t.Fatal("server error was not retried")
+		}
+		if !retryableSendError(&pushplus.Error{Code: 999, Cause: errors.New("connection reset")}) {
+			t.Fatal("transport failure was not retried")
+		}
+		if !retryableSendError(errors.New("dial tcp: timeout")) {
+			t.Fatal("plain transport error was not retried")
 		}
 	})
 

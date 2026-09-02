@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react"
 import {
   Archive, Check, ChevronRight, CircleAlert, Filter, Image, LoaderCircle, LockKeyhole,
-  LogOut, MessageCircle, Moon, RefreshCw, Search, Send, Settings, ShieldCheck,
+  LogOut, MessageCircle, Moon, Pin, RefreshCw, Search, Send, Settings, ShieldCheck,
   Sun, Wifi, WifiOff,
 } from "lucide-react"
 import { Button } from "./components/ui/button"
@@ -14,8 +14,9 @@ import { cn } from "./lib/utils"
 
 type TelegramState = { status: string; account?: string; qrCode?: string; qrExpires?: number; error?: string }
 type DialogItem = {
-  peerKey: string; kind: string; title: string; subtitle?: string; selectable: boolean
-  selected: boolean; adFilter: boolean; archived: boolean
+  peerKey: string; kind: string; title: string; subtitle?: string; username?: string
+  lastSender?: string; lastText?: string; selectable: boolean
+  selected: boolean; adFilter: boolean; archived: boolean; pinned: boolean
 }
 type Delivery = { shortCode?: string; title: string; content?: string; time: string; status: string; error?: string }
 type Dashboard = {
@@ -178,7 +179,7 @@ function TelegramPanel({ dashboard, visible, setDashboard, reload, notify }: { d
   const [archiveOpen, setArchiveOpen] = useState(false)
   const telegram = dashboard.telegram
   const dialogs = useMemo(() => dashboard.dialogs.filter((item) => {
-    const matches = (item.title + " " + (item.subtitle || "")).toLowerCase().includes(search.toLowerCase())
+    const matches = [item.title, item.subtitle, item.username].join(" ").toLowerCase().includes(search.toLowerCase())
     return matches && (!selectedOnly || item.selected)
   }), [dashboard.dialogs, search, selectedOnly])
   const active = dialogs.filter((item) => !item.archived)
@@ -257,7 +258,17 @@ function DialogRow({ item, patch }: { item: DialogItem; patch: (item: DialogItem
   return <>
     <div className={cn("group flex min-h-[60px] items-center rounded-[10px] px-2.5 py-2 transition-colors", item.selected ? "bg-[var(--selected)] text-white" : "hover:bg-muted")}>
       <div className="grid size-11 shrink-0 place-items-center rounded-full text-[15px] font-semibold text-white [text-shadow:0_1px_2px_rgba(0,0,0,.25)]" style={{ background: avatarColor(item.peerKey) }}>{initials}</div>
-      <div className="ml-2.5 min-w-0 flex-1"><div className="flex items-center gap-2"><span className="truncate text-[15px] font-semibold">{item.title}</span>{item.kind === "channel" && <span className={cn("shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium", item.selected ? "bg-white/25 text-white" : "bg-muted text-muted-foreground")}>频道</span>}</div><div className={cn("mt-0.5 truncate text-[13px]", item.selected ? "text-white/80" : "text-muted-foreground")}>{item.subtitle || item.kind}</div></div>
+      <div className="ml-2.5 min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-[15px] font-semibold">{item.title}</span>
+          {item.subtitle && <span className={cn("shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium", item.selected ? "bg-white/25 text-white" : "bg-muted text-muted-foreground")}>{item.subtitle}</span>}
+          {item.pinned && <Pin className={cn("size-3.5 shrink-0", item.selected ? "text-white/80" : "text-muted-foreground")} aria-label="已置顶" />}
+        </div>
+        <div className={cn("mt-0.5 truncate text-[13px]", item.selected ? "text-white/75" : "text-muted-foreground")}>
+          {item.lastSender && <span className={item.selected ? "text-white" : "text-foreground/75"}>{item.lastSender}: </span>}
+          {item.lastText || (item.lastSender ? "" : item.username)}
+        </div>
+      </div>
       {item.selectable && <div className="ml-2 flex items-center gap-2">
         {item.selected && <button type="button" className={cn("grid size-8 place-items-center rounded-full transition-colors hover:bg-white/20", item.adFilter ? "text-white" : "text-white/55")} onClick={() => void patch(item, { adFilter: !item.adFilter })} aria-label={item.adFilter ? "关闭广告过滤" : "开启广告过滤"} title={item.adFilter ? "广告过滤已开启" : "广告过滤已关闭"}><Filter className="size-4" /></button>}
         <Checkbox className={item.selected ? "border-white/70 focus-visible:ring-white focus-visible:ring-offset-[var(--selected)] data-[state=checked]:border-white data-[state=checked]:bg-white data-[state=checked]:text-[var(--selected)]" : undefined} checked={item.selected} onCheckedChange={(checked) => void patch(item, { selected: checked === true })} aria-label={`转发 ${item.title}`} />
@@ -307,7 +318,7 @@ function DeliveryBubble({ item }: { item: Delivery }) {
     <div className="wechat-bubble relative min-w-[152px] px-2.5 py-1.5">
       <div className="text-[13px] font-semibold text-[var(--wechat-accent)]">{item.title}</div>
       <div className="mt-0.5 whitespace-pre-wrap break-words text-[14px] leading-[19px]">{truncateText(content, 420)}</div>
-      {item.error && <div className="mt-1 truncate text-[11px] text-red-700 dark:text-red-300" title={item.error}>{item.error}</div>}
+      {item.error && <div className="mt-1 max-w-[240px] truncate text-[11px] text-red-700 dark:text-red-300" title={item.error}>{item.error}</div>}
       <div className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-[var(--wechat-bubble-meta)]">{deliveryStatus(item.status)}<span>{item.time}</span>{item.status === "failed" ? <CircleAlert className="size-3" /> : <Check className="size-3" />}</div>
     </div>
   </div>

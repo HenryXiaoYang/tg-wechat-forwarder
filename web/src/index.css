@@ -93,17 +93,18 @@ button { cursor: pointer; }
 .wechat-bubble {
   background: var(--wechat-bubble);
   color: var(--wechat-bubble-foreground);
-  border-radius: 14px 14px 6px 14px;
+  border-radius: 14px 14px 0 14px;
   box-shadow: var(--bubble-shadow);
 }
-/* Telegram's outgoing tail: a small fin hanging off the bottom-right corner. */
+/* Telegram's outgoing tail: a fin flush against the bubble's square bottom-right
+   corner, tapering to a point on the baseline. */
 .wechat-bubble::after {
   content: "";
   position: absolute;
-  right: -6px;
+  right: -8px;
   bottom: 0;
   border-style: solid;
-  border-width: 0 0 13px 8px;
+  border-width: 0 8px 13px 0;
   border-color: transparent transparent var(--wechat-bubble) transparent;
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

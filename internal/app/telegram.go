@@ -27,6 +27,9 @@ import (
 	"rsc.io/qr"
 )
 
+// Telegram has exactly two peer folders: 0 is the main list, 1 is the archive.
+const archiveFolderID = 1
+
 type telegramState struct {
 	Status    string `json:"status"`
 	Account   string `json:"account,omitempty"`
@@ -350,43 +353,32 @@ func (t *telegramService) refreshDialogs(ctx context.Context) error {
 	if api == nil {
 		return errors.New("Telegram 未连接")
 	}
+	// A single query without folder_id returns every folder, and each dialog carries
+	// its own folder. Asking for folder 1 separately would only drag main-list pinned
+	// chats into the archive, because Telegram returns them for any folder.
 	byKey := make(map[string]dialog)
-	collect := func(archived bool) error {
-		builder := query.GetDialogs(api).BatchSize(100)
-		if archived {
-			builder = builder.FolderID(1)
+	err := query.GetDialogs(api).BatchSize(100).ForEach(ctx, func(_ context.Context, elem querydialogs.Elem) error {
+		if d, ok := dialogFromTelegram(elem); ok {
+			byKey[d.PeerKey] = d
 		}
-		return builder.ForEach(ctx, func(_ context.Context, elem querydialogs.Elem) error {
-			d, ok := dialogFromTelegram(elem, archived)
-			if ok {
-				byKey[d.PeerKey] = d
-			}
-			return nil
-		})
-	}
-	if err := collect(false); err != nil {
-		return err
-	}
-	if err := collect(true); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	dialogs := make([]dialog, 0, len(byKey))
 	for _, d := range byKey {
 		dialogs = append(dialogs, d)
 	}
-	sort.Slice(dialogs, func(i, j int) bool {
-		if dialogs[i].Archived != dialogs[j].Archived {
-			return !dialogs[i].Archived
-		}
-		return strings.ToLower(dialogs[i].Title) < strings.ToLower(dialogs[j].Title)
-	})
+	// Order lives in the store query: archived last, pinned first, newest first.
 	return t.store.replaceDialogs(ctx, dialogs)
 }
 
-func dialogFromTelegram(elem querydialogs.Elem, archived bool) (dialog, bool) {
+func dialogFromTelegram(elem querydialogs.Elem) (dialog, bool) {
 	if elem.Deleted() {
 		return dialog{}, false
 	}
+	var d dialog
 	switch peer := elem.Peer.(type) {
 	case *tg.InputPeerUser:
 		user, ok := elem.Entities.User(peer.UserID)
@@ -403,20 +395,13 @@ func dialogFromTelegram(elem querydialogs.Elem, archived bool) (dialog, bool) {
 		} else if user.Bot {
 			subtitle = "机器人"
 		}
-		if user.Username != "" && !user.Self {
-			subtitle += " · @" + user.Username
-		}
-		return dialog{PeerKey: peerKey("user", peer.UserID), Kind: "user", Title: title, Subtitle: subtitle, Archived: archived}, true
+		d = dialog{PeerKey: peerKey("user", peer.UserID), Kind: "user", Title: title, Subtitle: subtitle, Username: atName(user.Username)}
 	case *tg.InputPeerChat:
 		chat, ok := elem.Entities.Chat(peer.ChatID)
 		if !ok {
 			return dialog{}, false
 		}
-		subtitle, selectable := "群组", !chat.Noforwards
-		if chat.Noforwards {
-			subtitle += " · 内容受保护"
-		}
-		return dialog{PeerKey: peerKey("chat", peer.ChatID), Kind: "group", Title: chat.Title, Subtitle: subtitle, Selectable: selectable, Archived: archived}, true
+		d = dialog{PeerKey: peerKey("chat", peer.ChatID), Kind: "group", Title: chat.Title, Subtitle: "群组", Selectable: true}
 	case *tg.InputPeerChannel:
 		channel, ok := elem.Entities.Channel(peer.ChannelID)
 		if !ok {
@@ -429,21 +414,91 @@ func dialogFromTelegram(elem querydialogs.Elem, archived bool) (dialog, bool) {
 		if channel.Forum {
 			subtitle = "论坛"
 		}
-		if channel.Username != "" {
-			subtitle += " · @" + channel.Username
-		}
-		selectable := !channel.Noforwards
-		if channel.Noforwards {
-			subtitle += " · 内容受保护"
-		}
-		return dialog{PeerKey: peerKey("channel", peer.ChannelID), Kind: kind, Title: channel.Title, Subtitle: subtitle, Selectable: selectable, Archived: archived}, true
+		d = dialog{PeerKey: peerKey("channel", peer.ChannelID), Kind: kind, Title: channel.Title, Subtitle: subtitle, Username: atName(channel.Username), Selectable: true}
 	default:
 		return dialog{}, false
+	}
+	if info, ok := elem.Dialog.(*tg.Dialog); ok {
+		folder, _ := info.GetFolderID()
+		d.Pinned, d.Archived = info.Pinned, folder == archiveFolderID
+	}
+	if elem.Last != nil {
+		d.LastAt = int64(elem.Last.GetDate())
+		if last, ok := elem.Last.(*tg.Message); ok {
+			d.LastSender, d.LastText = dialogSender(elem, last), messagePreview(last)
+		}
+	}
+	return d, true
+}
+
+func atName(username string) string {
+	if username == "" {
+		return ""
+	}
+	return "@" + username
+}
+
+// dialogSender resolves the author of a chat-list preview. It mirrors senderName
+// but reads peers from the dialog query's entity set, which has its own lookups.
+func dialogSender(elem querydialogs.Elem, message *tg.Message) string {
+	if message.Out {
+		return "你"
+	}
+	if message.PostAuthor != "" {
+		return message.PostAuthor
+	}
+	from, ok := message.GetFromID()
+	if !ok {
+		return ""
+	}
+	switch value := from.(type) {
+	case *tg.PeerUser:
+		if user, ok := elem.Entities.User(value.UserID); ok {
+			if name := strings.TrimSpace(user.FirstName + " " + user.LastName); name != "" {
+				return name
+			}
+			return atName(user.Username)
+		}
+	case *tg.PeerChannel:
+		if channel, ok := elem.Entities.Channel(value.ChannelID); ok {
+			return channel.Title
+		}
+	case *tg.PeerChat:
+		if chat, ok := elem.Entities.Chat(value.ChatID); ok {
+			return chat.Title
+		}
+	}
+	return ""
+}
+
+// messagePreview is the one-line summary shown in the chat list.
+func messagePreview(message *tg.Message) string {
+	if text := strings.TrimSpace(message.Message); text != "" {
+		return text
+	}
+	switch message.Media.(type) {
+	case nil, *tg.MessageMediaEmpty:
+		return ""
+	case *tg.MessageMediaPhoto:
+		return "[图片]"
+	case *tg.MessageMediaDocument:
+		return "[文件]"
+	case *tg.MessageMediaWebPage:
+		return "[链接]"
+	case *tg.MessageMediaPoll:
+		return "[投票]"
+	case *tg.MessageMediaContact:
+		return "[联系人]"
+	case *tg.MessageMediaGeo, *tg.MessageMediaGeoLive, *tg.MessageMediaVenue:
+		return "[位置]"
+	default:
+		return "[消息]"
 	}
 }
 
 func (t *telegramService) handleMessage(entities tg.Entities, message *tg.Message) {
-	if message == nil || message.Out || message.Noforwards {
+	// message.Noforwards (content protection) is deliberately not a filter here.
+	if message == nil || message.Out {
 		return
 	}
 	t.mu.RLock()
@@ -466,10 +521,17 @@ func (t *telegramService) processMessage(ctx context.Context, entities tg.Entiti
 		return
 	}
 	d, ok, err := t.store.dialog(ctx, key)
-	if err != nil || !ok || !d.Selected || message.Date < int(d.SelectedAt) {
+	if err != nil || !ok {
 		return
 	}
 	sender := senderName(entities, message)
+	// Every live message refreshes the chat-list preview, selected or not.
+	if err := t.store.updateDialogPreview(ctx, key, sender, messagePreview(message), int64(message.Date)); err != nil {
+		slog.Warn("update dialog preview", "error", err)
+	}
+	if !d.Selected || message.Date < int(d.SelectedAt) {
+		return
+	}
 	text, image, skip := messageContent(message)
 	if skip {
 		return

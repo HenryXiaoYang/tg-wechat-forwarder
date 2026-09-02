@@ -3,14 +3,20 @@ services:
     build:
       context: .
       args:
-        VERSION: local
+        VERSION: ${VERSION:-local}
     image: tg-wechat-forwarder:local
     restart: unless-stopped
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file: .env
+    environment:
+      # The published port and the image healthcheck both assume 8080 inside the
+      # container, so pin it here and let .env's LISTEN_ADDR apply to direct runs.
+      LISTEN_ADDR: ":8080"
     ports:
-      - "8080:8080"
+      # Loopback by default: the panel speaks plain HTTP and has no TLS of its own.
+      # Put a reverse proxy in front, or set BIND_ADDR=0.0.0.0 to expose it as is.
+      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-8080}:8080"
     volumes:
       - ./data:/app/data
     read_only: true
@@ -18,3 +24,4 @@ services:
       - /tmp:size=64m,mode=1777
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 15s
