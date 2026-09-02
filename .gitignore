@@ -1,0 +1,12 @@
+.env
+data/
+/forwarder
+/forwarder.exe
+web/node_modules/
+web/data/
+web/test-results/
+web/playwright-report/
+web/blob-report/
+dogfood-output/
+.DS_Store
+*.log

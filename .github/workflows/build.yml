@@ -1,0 +1,89 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - name: Build frontend
+        working-directory: web
+        run: npm ci && npm run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium ffmpeg
+      - name: End-to-end tests
+        working-directory: web
+        run: npm run test:e2e
+      - name: Test backend
+        run: go test ./...
+      - name: Build current platform
+        run: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o forwarder ./cmd/forwarder
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - name: Build embedded frontend
+        working-directory: web
+        run: npm ci && npm run build
+      - name: Cross-compile release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            name="tg-wechat-forwarder_${GITHUB_REF_NAME}_${os}_${arch}"
+            output="$name"
+            if [ "$os" = windows ]; then output="$name.exe"; fi
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "$output" ./cmd/forwarder
+            if [ "$os" = windows ]; then
+              zip -q "dist/$name.zip" "$output"
+            else
+              tar -czf "dist/$name.tar.gz" "$output"
+            fi
+          done
+          cd dist
+          sha256sum * > checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+          fi

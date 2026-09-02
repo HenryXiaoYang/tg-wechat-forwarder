@@ -1,0 +1,109 @@
+@import "tailwindcss";
+@source not "../dist";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --surface: #ffffff;
+  --page: #e6eaef;
+  --card-glass: rgba(255, 255, 255, 0.82);
+  --card-shadow: 0 1px 2px rgba(16, 35, 47, 0.08), 0 8px 24px rgba(16, 35, 47, 0.07);
+  --foreground: #000000;
+  --muted: #f1f2f5;
+  --muted-foreground: #67717a;
+  --border: #e6e8eb;
+  --accent: #2481cc;
+  --accent-hover: #1f6fb0;
+  --selected: #3e8ae0;
+  --telegram-link: #0077b3;
+  --wechat: #cfe3bb;
+  --wechat-canvas: linear-gradient(165deg, #dcecca, #c4dcac 55%, #d2e6bf);
+  --wechat-bubble: #effdde;
+  --wechat-bubble-foreground: #0b1608;
+  --wechat-bubble-meta: #4fae4e;
+  --wechat-accent: #00833f;
+  --bubble-shadow: 0 1px 2px rgba(16, 35, 47, 0.16);
+  --panel-shadow: 0 2px 8px rgba(16, 35, 47, 0.1), 0 12px 40px rgba(16, 35, 47, 0.14);
+}
+.dark {
+  color-scheme: dark;
+  --background: #17212b;
+  --surface: #17212b;
+  --page: #080e14;
+  --card-glass: rgba(23, 33, 43, 0.82);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --foreground: #ffffff;
+  --muted: #232e3c;
+  --muted-foreground: #7d93a8;
+  --border: #0f1a24;
+  --accent: #5288c1;
+  --accent-hover: #4a7ab0;
+  --selected: #2b5278;
+  --telegram-link: #6ab3f3;
+  --wechat: #0e1621;
+  --wechat-canvas: linear-gradient(165deg, #101d29, #0b131c 60%, #0e1824);
+  --wechat-bubble: #2b5278;
+  --wechat-bubble-foreground: #ffffff;
+  --wechat-bubble-meta: #a5c4e4;
+  --wechat-accent: #64c47c;
+  --bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --panel-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+}
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-height: 100%; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+.scrollbar { scrollbar-width: thin; scrollbar-color: #8a929966 transparent; }
+
+/* Floating panel over the chat wallpaper, like Telegram macOS' header and composer. */
+.glass-card {
+  border-radius: 12px;
+  background: var(--card-glass);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* Telegram macOS chat wallpaper: flat tint plus a doodle tile blended in, so one
+   tile serves both themes (soft-light keeps white strokes subtle over either). */
+.wechat-chat {
+  background-color: var(--wechat);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160' fill='none' stroke='%23fff' stroke-opacity='.5' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 36c-9-8-11-16-6-19 3-2 6 0 6 3 0-3 3-5 6-3 5 3 3 11-6 19z'/%3E%3Cpath d='M74 12l4 9 9 1-6.5 6.5 1.5 9-8-4.5-8 4.5 1.5-9L61 22l9-1z'/%3E%3Ccircle cx='131' cy='31' r='12'/%3E%3Ccircle cx='131' cy='31' r='4'/%3E%3Cpath d='M38 70a13 13 0 1 0 11 20 15 15 0 0 1-11-20z'/%3E%3Ccircle cx='95' cy='72' r='13'/%3E%3Cpath d='M90 69h.01M100 69h.01M89 77a8 8 0 0 0 12 0'/%3E%3Cellipse cx='129' cy='103' rx='10' ry='12'/%3E%3Cpath d='M129 115v9'/%3E%3Cpath d='M60 141a9 9 0 0 1 1-18 12 12 0 0 1 22-2 9 9 0 0 1-2 20z'/%3E%3Cpath d='M15 126c0-8 12-8 12 0s-15 9-15-1 19-11 19 2'/%3E%3C/svg%3E"), var(--wechat-canvas);
+  background-size: 190px 190px, auto;
+  background-blend-mode: soft-light, normal;
+}
+.wechat-bubble {
+  background: var(--wechat-bubble);
+  color: var(--wechat-bubble-foreground);
+  border-radius: 14px 14px 6px 14px;
+  box-shadow: var(--bubble-shadow);
+}
+/* Telegram's outgoing tail: a small fin hanging off the bottom-right corner. */
+.wechat-bubble::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  bottom: 0;
+  border-style: solid;
+  border-width: 0 0 13px 8px;
+  border-color: transparent transparent var(--wechat-bubble) transparent;
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

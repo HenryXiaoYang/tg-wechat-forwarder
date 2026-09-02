@@ -1,0 +1,13 @@
+.git
+.github
+.env
+data
+dogfood-output
+web/node_modules
+web/dist
+web/data
+web/test-results
+web/playwright-report
+web/blob-report
+DESIGN.md
+README.md

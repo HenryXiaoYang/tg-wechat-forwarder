@@ -1,0 +1,20 @@
+services:
+  forwarder:
+    build:
+      context: .
+      args:
+        VERSION: local
+    image: tg-wechat-forwarder:local
+    restart: unless-stopped
+    init: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
