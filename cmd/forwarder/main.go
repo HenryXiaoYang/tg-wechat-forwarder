@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/hxy/tg-wechat-forwarder/internal/app"
+	"github.com/HenryXiaoYang/tg-wechat-forwarder/internal/app"
 )
 
 var version = "dev"

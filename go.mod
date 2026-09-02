@@ -1,4 +1,4 @@
-module github.com/hxy/tg-wechat-forwarder
+module github.com/HenryXiaoYang/tg-wechat-forwarder
 
 go 1.25.0
 
