@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	webui "github.com/hxy/tg-wechat-ilink-forwarder/web"
+	webui "github.com/hxy/tg-wechat-forwarder/web"
 )
 
 var version = "dev"

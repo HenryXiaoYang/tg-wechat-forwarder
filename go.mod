@@ -1,4 +1,4 @@
-module github.com/hxy/tg-wechat-ilink-forwarder
+module github.com/hxy/tg-wechat-forwarder
 
 go 1.25.0
 
