@@ -9,5 +9,4 @@ web/data
 web/test-results
 web/playwright-report
 web/blob-report
-DESIGN.md
 README.md
