@@ -1,11 +1,13 @@
-FROM node:24-alpine AS frontend
+# The frontend and the compiler run on the builder's own architecture; only the
+# Go link step targets the requested platform, so multi-arch needs no emulation.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -14,7 +16,10 @@ COPY internal ./internal
 COPY web/embed.go ./web/embed.go
 COPY --from=frontend /src/web/dist ./web/dist
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /forwarder ./cmd/forwarder
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /forwarder ./cmd/forwarder
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata \

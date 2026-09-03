@@ -11,11 +11,35 @@
 ## 运行
 
 ```bash
-cp .env.example .env    # 至少改 APP_SECRET、TELEGRAM_API_ID/HASH
+cp .env.example .env    # 填 APP_SECRET、TELEGRAM_API_ID、TELEGRAM_API_HASH
 mkdir -p data
-docker compose build
-docker compose run --rm forwarder hash   # 输入管理员密码，把输出填进 ADMIN_PASSWORD_HASH（单引号包住）
+docker compose pull                      # 或 docker compose build 从源码构建
+docker compose run --rm forwarder hash   # 生成 ADMIN_PASSWORD_HASH，见下一节
 docker compose up -d
+```
+
+镜像发布在 GitHub Packages：`ghcr.io/henryxiaoyang/tg-wechat-forwarder`（tag 版本号 + `latest`，主分支为 `main`，含 amd64 和 arm64）。
+
+### 生成密码哈希
+
+`.env` 只存密码的 bcrypt 哈希，不存明文。任选一种方式：
+
+```bash
+docker compose run --rm forwarder hash   # 用镜像
+go run ./cmd/forwarder hash              # 本地装了 Go
+./forwarder hash                         # 用 release 里的二进制
+```
+
+按提示输入密码后会打印一行哈希。想让密码不回显、也不进 shell 历史：
+
+```bash
+read -rs PW && printf '%s\n' "$PW" | docker compose run --rm -T forwarder hash; unset PW
+```
+
+把整行填进 `.env`，**必须用单引号包住**，否则 `$` 会被当成变量展开：
+
+```
+ADMIN_PASSWORD_HASH='$2a$10$CPd3G4hyL78j.wc4frIeFew0rdZ51lFTot9kVP6dynNZkqUsbCGTW'
 ```
 
 打开 <http://127.0.0.1:8080> 登录，扫码接入 Telegram，在设置里填 PushPlus 和图床，然后勾选要转发的会话。

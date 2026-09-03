@@ -4,7 +4,8 @@ services:
       context: .
       args:
         VERSION: ${VERSION:-local}
-    image: tg-wechat-forwarder:local
+    # docker compose pull 取预构建镜像，docker compose build 从源码构建到同一个标签
+    image: ${IMAGE:-ghcr.io/henryxiaoyang/tg-wechat-forwarder:latest}
     restart: unless-stopped
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"
