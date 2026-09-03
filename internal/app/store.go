@@ -56,9 +56,19 @@ type queuedMessage struct {
 }
 
 func openStore(secret string) (*store, error) {
-	if err := os.MkdirAll(filepath.Dir(dataFile), 0o700); err != nil {
+	dir := filepath.Dir(dataFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
+	// MkdirAll is happy with a directory this process cannot write to, and sqlite
+	// then reports only "unable to open database file (14)". Probe first so the
+	// error names the uid that needs to own ./data.
+	probe, err := os.CreateTemp(dir, ".probe")
+	if err != nil {
+		return nil, fmt.Errorf("data directory %s is not writable by uid %d, chown it to that uid: %w", dir, os.Getuid(), err)
+	}
+	probe.Close()
+	os.Remove(probe.Name())
 	db, err := sql.Open("sqlite", "file:"+dataFile+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

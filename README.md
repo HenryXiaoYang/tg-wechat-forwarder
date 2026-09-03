@@ -12,13 +12,12 @@
 
 ```bash
 cp .env.example .env    # 填 APP_SECRET、TELEGRAM_API_ID、TELEGRAM_API_HASH
-mkdir -p data
 docker compose pull                      # 或 docker compose build 从源码构建
 docker compose run --rm forwarder hash   # 生成 ADMIN_PASSWORD_HASH，见下一节
 docker compose up -d
 ```
 
-镜像发布在 GitHub Packages：`ghcr.io/henryxiaoyang/tg-wechat-forwarder`（tag 版本号 + `latest`，主分支为 `main`，含 amd64 和 arm64）。
+镜像发布在 GitHub Packages：`ghcr.io/henryxiaoyang/tg-wechat-forwarder`，含 amd64 和 arm64。主分支是 `main`（compose 默认拉这个），打 `v*` 标签才会发布版本号和 `latest`。
 
 ### 生成密码哈希
 
@@ -47,7 +46,6 @@ ADMIN_PASSWORD_HASH='$2a$10$CPd3G4hyL78j.wc4frIeFew0rdZ51lFTot9kVP6dynNZkqUsbCGT
 - 默认只监听回环。要从别的机器访问，请在前面用 Caddy/Nginx 提供 HTTPS，或把 `.env` 的 `BIND_ADDR` 改成 `0.0.0.0`。
 - 管理员密码只以 bcrypt 哈希形式存在 `.env` 里，改密码重新跑一次 `forwarder hash` 即可（会顺带让已有会话全部失效）。
 - 所有配置在 `./data/data.db`。Telegram 会话、第三方密钥和消息内容用 `APP_SECRET` 加密，**请备份且不要更改**，否则只能重新登录和配置。
-- Linux 上 `./data` 写不进去时，把 `.env` 的 `PUID`/`PGID` 改成 `id -u`/`id -g` 的值。
 
 ## 转发约定
 
