@@ -25,7 +25,8 @@ export default defineConfig({
       ...process.env,
       LISTEN_ADDR: "127.0.0.1:18085",
       ADMIN_USERNAME: "e2e-admin",
-      ADMIN_PASSWORD: "e2e-password-123",
+      // bcrypt hash of credentials.password in e2e/helpers.ts
+      ADMIN_PASSWORD_HASH: "$2a$10$CPd3G4hyL78j.wc4frIeFew0rdZ51lFTot9kVP6dynNZkqUsbCGTW",
       APP_SECRET: "e2e-only-secret-with-at-least-32-characters",
       TELEGRAM_API_ID: "12345",
       TELEGRAM_API_HASH: "not-a-real-telegram-api-hash",

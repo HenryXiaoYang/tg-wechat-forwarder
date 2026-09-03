@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	pushplus "github.com/pushplus/perk-pushplus-go-sdk"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestCoreHelpers(t *testing.T) {
@@ -88,8 +89,29 @@ func TestCoreHelpers(t *testing.T) {
 		}
 	})
 
+	t.Run("credentials are checked against the bcrypt hash", func(t *testing.T) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("long-test-password"), bcrypt.MinCost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := newAuthenticator(config{AdminUsername: "admin", AdminPasswordHash: string(hash), AppSecret: "test-secret-that-is-at-least-32-bytes"})
+		if !a.validCredentials("admin", "long-test-password") {
+			t.Fatal("correct credentials were rejected")
+		}
+		if a.validCredentials("admin", "long-test-passwore") {
+			t.Fatal("wrong password was accepted")
+		}
+		if a.validCredentials("root", "long-test-password") {
+			t.Fatal("wrong username was accepted")
+		}
+	})
+
 	t.Run("signed session", func(t *testing.T) {
-		a := newAuthenticator(config{AdminUsername: "admin", AdminPassword: "long-test-password", AppSecret: "test-secret-that-is-at-least-32-bytes"})
+		hash, err := bcrypt.GenerateFromPassword([]byte("long-test-password"), bcrypt.MinCost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := newAuthenticator(config{AdminUsername: "admin", AdminPasswordHash: string(hash), AppSecret: "test-secret-that-is-at-least-32-bytes"})
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest("GET", "http://example.test", nil)
 		a.setSession(recorder, request)

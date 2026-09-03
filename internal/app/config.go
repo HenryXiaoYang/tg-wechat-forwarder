@@ -8,15 +8,16 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type config struct {
-	ListenAddr      string
-	AdminUsername   string
-	AdminPassword   string
-	AppSecret       string
-	TelegramAppID   int
-	TelegramAppHash string
+	ListenAddr        string
+	AdminUsername     string
+	AdminPasswordHash string
+	AppSecret         string
+	TelegramAppID     int
+	TelegramAppHash   string
 }
 
 func loadConfig() (config, error) {
@@ -30,21 +31,22 @@ func loadConfig() (config, error) {
 	}
 
 	cfg := config{
-		ListenAddr:      envOr("LISTEN_ADDR", ":8080"),
-		AdminUsername:   strings.TrimSpace(os.Getenv("ADMIN_USERNAME")),
-		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
-		AppSecret:       os.Getenv("APP_SECRET"),
-		TelegramAppID:   appID,
-		TelegramAppHash: strings.TrimSpace(os.Getenv("TELEGRAM_API_HASH")),
+		ListenAddr:        envOr("LISTEN_ADDR", ":8080"),
+		AdminUsername:     strings.TrimSpace(os.Getenv("ADMIN_USERNAME")),
+		AdminPasswordHash: strings.TrimSpace(os.Getenv("ADMIN_PASSWORD_HASH")),
+		AppSecret:         os.Getenv("APP_SECRET"),
+		TelegramAppID:     appID,
+		TelegramAppHash:   strings.TrimSpace(os.Getenv("TELEGRAM_API_HASH")),
 	}
 	if cfg.AdminUsername == "" {
 		return config{}, errors.New("ADMIN_USERNAME is required")
 	}
-	if len(cfg.AdminPassword) < 12 {
-		return config{}, errors.New("ADMIN_PASSWORD must be at least 12 characters")
+	if cfg.AdminPasswordHash == "" {
+		return config{}, errors.New("ADMIN_PASSWORD_HASH is required; generate one with: forwarder hash")
 	}
-	if cfg.AdminPassword == "change-this-password" {
-		return config{}, errors.New("ADMIN_PASSWORD still has the unsafe example value")
+	// Fail at startup rather than turning a malformed hash into "wrong password".
+	if _, err := bcrypt.Cost([]byte(cfg.AdminPasswordHash)); err != nil {
+		return config{}, fmt.Errorf("ADMIN_PASSWORD_HASH is not a bcrypt hash (generate one with: forwarder hash): %w", err)
 	}
 	if len(cfg.AppSecret) < 32 {
 		return config{}, errors.New("APP_SECRET must be at least 32 characters")

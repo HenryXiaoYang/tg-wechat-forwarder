@@ -11,14 +11,17 @@
 ## 运行
 
 ```bash
-cp .env.example .env    # 至少改 ADMIN_PASSWORD、APP_SECRET、TELEGRAM_API_ID/HASH
+cp .env.example .env    # 至少改 APP_SECRET、TELEGRAM_API_ID/HASH
 mkdir -p data
-docker compose up -d --build
+docker compose build
+docker compose run --rm forwarder hash   # 输入管理员密码，把输出填进 ADMIN_PASSWORD_HASH（单引号包住）
+docker compose up -d
 ```
 
 打开 <http://127.0.0.1:8080> 登录，扫码接入 Telegram，在设置里填 PushPlus 和图床，然后勾选要转发的会话。
 
 - 默认只监听回环。要从别的机器访问，请在前面用 Caddy/Nginx 提供 HTTPS，或把 `.env` 的 `BIND_ADDR` 改成 `0.0.0.0`。
+- 管理员密码只以 bcrypt 哈希形式存在 `.env` 里，改密码重新跑一次 `forwarder hash` 即可（会顺带让已有会话全部失效）。
 - 所有配置在 `./data/data.db`。Telegram 会话、第三方密钥和消息内容用 `APP_SECRET` 加密，**请备份且不要更改**，否则只能重新登录和配置。
 - Linux 上 `./data` 写不进去时，把 `.env` 的 `PUID`/`PGID` 改成 `id -u`/`id -g` 的值。
 

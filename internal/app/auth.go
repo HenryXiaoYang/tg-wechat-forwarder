@@ -1,43 +1,72 @@
 package app
 
 import (
+	"bufio"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const sessionCookie = "forwarder_session"
 
 type authenticator struct {
-	username [32]byte
-	password [32]byte
-	key      [32]byte
-	mu       sync.Mutex
-	failures map[string][]time.Time
+	username     [32]byte
+	passwordHash []byte
+	key          [32]byte
+	mu           sync.Mutex
+	failures     map[string][]time.Time
 }
 
 func newAuthenticator(cfg config) *authenticator {
-	passwordHash := sha256.Sum256([]byte(cfg.AdminPassword))
 	return &authenticator{
-		username: sha256.Sum256([]byte(cfg.AdminUsername)),
-		password: passwordHash,
-		key:      sha256.Sum256([]byte("session\x00" + cfg.AppSecret + "\x00" + base64.RawURLEncoding.EncodeToString(passwordHash[:]))),
+		username:     sha256.Sum256([]byte(cfg.AdminUsername)),
+		passwordHash: []byte(cfg.AdminPasswordHash),
+		// The hash is part of the session key, so changing the password logs everyone out.
+		key:      sha256.Sum256([]byte("session\x00" + cfg.AppSecret + "\x00" + cfg.AdminPasswordHash)),
 		failures: make(map[string][]time.Time),
 	}
 }
 
 func (a *authenticator) validCredentials(username, password string) bool {
 	u := sha256.Sum256([]byte(username))
-	p := sha256.Sum256([]byte(password))
-	return subtle.ConstantTimeCompare(u[:], a.username[:])&subtle.ConstantTimeCompare(p[:], a.password[:]) == 1
+	// Both checks always run: a wrong username must cost the same as a wrong password.
+	passwordOK := bcrypt.CompareHashAndPassword(a.passwordHash, []byte(password)) == nil
+	usernameOK := subtle.ConstantTimeCompare(u[:], a.username[:]) == 1
+	return usernameOK && passwordOK
+}
+
+// PrintPasswordHash reads one password from stdin and prints the bcrypt hash to
+// put in ADMIN_PASSWORD_HASH, so the plaintext never lands in a file.
+func PrintPasswordHash() error {
+	fmt.Fprint(os.Stderr, "Password: ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	password := strings.TrimRight(line, "\r\n")
+	if len(password) < 12 {
+		return errors.New("password must be at least 12 characters")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(hash))
+	return nil
 }
 
 func (a *authenticator) limited(remote string) bool {
